@@ -4,7 +4,8 @@
 const L = window.E4A_LANGS, T = window.E4A_T, CFG = window.E4A_CONFIG || {};
 const SHOPS = window.E4A_SHOPS, SCAMK = window.E4A_SCAM_KEYS, SESSION_CARDS = window.E4A_SESSION_CARDS;
 const LESSON_ICONS = window.E4A_LESSON_ICONS, PLACE_CODES = window.E4A_PLACE_CODES;
-const SHARED = !!(CFG.supabaseUrl && CFG.supabaseKey);
+const SB_URL = String(CFG.supabaseUrl || "").trim().replace(/\/rest\/v1\/?$/, "").replace(/\/+$/, "");
+const SHARED = !!(SB_URL && CFG.supabaseKey);
 const VIEWS = ["learn", "practice", "protect", "ambassador", "observatory"];
 
 const $ = (s, r = document) => r.querySelector(s);
@@ -262,7 +263,7 @@ const sbHeaders = () => {
   return h;
 };
 async function postRows(rows) {
-  const r = await fetch(`${CFG.supabaseUrl}/rest/v1/${CFG.table}`, {
+  const r = await fetch(`${SB_URL}/rest/v1/${CFG.table}`, {
     method: "POST", headers: Object.assign(sbHeaders(), { Prefer: "return=minimal,resolution=ignore-duplicates" }), body: JSON.stringify(rows)
   });
   if (!r.ok) throw new Error("post " + r.status);
@@ -281,7 +282,7 @@ async function loadRows() {
   if (SHARED) {
     await flushOutbox();
     try {
-      const r = await fetch(`${CFG.supabaseUrl}/rest/v1/${CFG.table}?select=*&order=ts.desc&limit=5000`, { headers: sbHeaders() });
+      const r = await fetch(`${SB_URL}/rest/v1/${CFG.table}?select=*&order=ts.desc&limit=5000`, { headers: sbHeaders() });
       if (r.ok) {
         const remote = await r.json(), seen = new Set(remote.map(rowKey));
         rows = remote.concat(rows.filter(x => !seen.has(rowKey(x)))); S.srcShared = true;
