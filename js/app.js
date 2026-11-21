@@ -16,7 +16,7 @@ const store = {
 };
 const detectLang = () => { const n = (navigator.language || "el").slice(0, 2); return L.some(l => l.code === n) ? n : "el"; };
 
-const S = { lang: store.get("lang", detectLang()), size: store.get("size", 1), view: "home", sub: {}, rows: [], srcShared: false };
+const S = { lang: store.get("lang", detectLang()), size: store.get("size", 1), voice: store.get("voice", false), view: "home", sub: {}, rows: [], srcShared: false, lastAuto: "" };
 const lang = () => L.find(l => l.code === S.lang) || L[0];
 const D = () => T[S.lang] || T.en;
 function t(key, vars) {
@@ -66,7 +66,11 @@ const ICON = {
   bell: '<path d="M6 16V11a6 6 0 0 1 12 0v5l1.5 2h-15z"/><path d="M10 20.5a2 2 0 0 0 4 0"/>',
   copy: '<rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V5a1 1 0 0 0-1-1H5a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h3"/>',
   trash: '<path d="M4.5 7h15M9.5 7V4.5h5V7M6.5 7l1 13h9l1-13"/>',
-  refresh: '<path d="M19.5 12a7.5 7.5 0 1 1-2.2-5.3M19.5 4.5v4.5H15"/>'
+  refresh: '<path d="M19.5 12a7.5 7.5 0 1 1-2.2-5.3M19.5 4.5v4.5H15"/>',
+  home: '<path d="M3.5 11.5L12 4l8.5 7.5"/><path d="M5.5 10v10h13V10"/><path d="M10 20v-5h4v5"/>',
+  mute: '<path d="M4 9.5h3.5L12 5.5v13l-4.5-4H4z"/><path d="M16 9.5l5 5M21 9.5l-5 5"/>',
+  help: '<circle cx="12" cy="12" r="9"/><path d="M9.6 9.4a2.5 2.5 0 1 1 3.5 2.3c-.7.4-1.1.9-1.1 1.8v.4"/><path d="M12 16.8v.4"/>',
+  settings: '<circle cx="12" cy="12" r="3"/><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5.3 5.3l2.1 2.1M16.6 16.6l2.1 2.1M5.3 18.7l2.1-2.1M16.6 7.4l2.1-2.1"/>'
 };
 const icon = (n, cls = "") => `<svg class="ic ${cls}" viewBox="0 0 24 24" aria-hidden="true">${ICON[n] || ""}</svg>`;
 const CH_ICON = { sms: "msg", chat: "msg", call: "call", email: "mail", notice: "paper", letter: "paper", app: "bell" };
@@ -106,7 +110,7 @@ function heroArt() {
 /* ---------- small UI helpers ---------- */
 function toast(msg) {
   const el = $("#toast"); el.textContent = msg; el.classList.add("on");
-  clearTimeout(toast.h); toast.h = setTimeout(() => el.classList.remove("on"), 3400);
+  clearTimeout(toast.h); toast.h = setTimeout(() => el.classList.remove("on"), 6500);
 }
 function dialog(msg, onYes) {
   const d = $("#dialog");
@@ -114,19 +118,26 @@ function dialog(msg, onYes) {
   d.hidden = false; dialog.yes = onYes; $(".btn.ghost", d).focus();
 }
 const sayBtn = id => `<button class="btn ghost say" data-act="say" data-target="${id}">${icon("speaker")}<span>${t("listen")}</span></button>`;
-function speak(text) {
+function speak(text, quiet) {
   const ss = window.speechSynthesis;
-  if (!ss || !window.SpeechSynthesisUtterance) { toast(t("noVoice")); return; }
+  if (!ss || !window.SpeechSynthesisUtterance) { if (!quiet) toast(t("noVoice")); return; }
   try {
     ss.cancel();
     const u = new SpeechSynthesisUtterance(text), code = lang().tts.toLowerCase(), pre = code.slice(0, 2);
-    u.lang = lang().tts; u.rate = 0.9;
+    u.lang = lang().tts; u.rate = 0.85;
     const vs = ss.getVoices() || [];
     const v = vs.find(v => (v.lang || "").toLowerCase() === code) || vs.find(v => (v.lang || "").toLowerCase().startsWith(pre));
-    if (v) u.voice = v; else if (vs.length) toast(t("noVoice"));
+    if (v) u.voice = v; else if (vs.length && !quiet) toast(t("noVoice"));
     ss.speak(u);
-  } catch (e) { toast(t("noVoice")); }
+  } catch (e) { if (!quiet) toast(t("noVoice")); }
 }
+function speakAuto() {
+  if (!S.voice) return;
+  const txt = [...document.querySelectorAll("#main [data-auto]")].map(e => e.textContent.trim()).filter(Boolean).join(". ");
+  if (txt && txt !== S.lastAuto) { S.lastAuto = txt; speak(txt, true); }
+}
+const buzz = ok => { try { navigator.vibrate && navigator.vibrate(ok ? 60 : [90, 60, 90]); } catch (e) { } };
+const helpBlock = k => `<div class="help"><button class="help-btn" data-act="help" aria-expanded="false">${icon("help")}<span>${t("helpBtn")}</span></button><p class="help-text" id="help-text" hidden>${t(k)}</p></div>`;
 const stopSpeak = () => { try { window.speechSynthesis && window.speechSynthesis.cancel(); } catch (e) { } };
 function face(v) {
   const y = [11, 13, 15, 17, 19][v - 1];
@@ -196,6 +207,7 @@ async function acceptToken(str) {
       sub.step = "result"; sub.res = { ok: true, msg: t("received", { amt: fmt(d.a) }), sub: d.signed ? t("signedOk") : "" };
     }
   } catch (e) { sub.step = "result"; sub.res = { ok: false, msg: t("invalidCode") }; }
+  buzz(sub.res.ok);
   if (S.sub === sub) render();
 }
 
@@ -244,7 +256,11 @@ function onScanned(data) {
 
 /* ---------- observatory data (local first, optional shared Supabase table) ---------- */
 const rowKey = r => r.pid + "|" + r.phase;
-const sbHeaders = () => ({ apikey: CFG.supabaseKey, Authorization: "Bearer " + CFG.supabaseKey, "Content-Type": "application/json" });
+const sbHeaders = () => {
+  const h = { apikey: CFG.supabaseKey, "Content-Type": "application/json" };
+  if (!/^sb_/.test(CFG.supabaseKey)) h.Authorization = "Bearer " + CFG.supabaseKey;   // legacy anon JWT keys only
+  return h;
+};
 async function postRows(rows) {
   const r = await fetch(`${CFG.supabaseUrl}/rest/v1/${CFG.table}`, {
     method: "POST", headers: Object.assign(sbHeaders(), { Prefer: "return=minimal,resolution=ignore-duplicates" }), body: JSON.stringify(rows)
@@ -310,40 +326,72 @@ function sampleRows() {
 
 /* ---------- views ---------- */
 function header() {
-  const l = lang(), home = S.view === "home";
-  return `<div class="bar">
-    ${home ? `<a class="brand" href="#home" aria-label="Euro4All">${logo()}<b>Euro4All</b></a>`
-      : `<button class="icon-btn" data-act="back" aria-label="${t("back")}">${icon("back", "flip")}<span>${t("back")}</span></button>`}
-    <div class="bar-tools">
-      <button class="icon-btn" data-act="size" aria-label="${t("textSize")}"><span class="aa">A<small>A</small></span></button>
-      <button class="icon-btn" data-act="langs" aria-label="${t("language")}" aria-expanded="false">${icon("globe")}<span>${l.name}</span></button>
-    </div></div>
+  const l = lang(), top = S.view === "home" || S.view === "setup";
+  const size = `<button class="hbtn" data-act="size" aria-label="${t("textSize")}"><span class="aa">A<small>A</small></span></button>`;
+  const voice = `<button class="hbtn voice ${S.voice ? "on" : ""}" data-act="voice" aria-pressed="${S.voice}">${icon(S.voice ? "speaker" : "mute")}<span>${t("voiceShort")}</span></button>`;
+  const left = top ? `<a class="brand" href="#home" aria-label="Euro4All">${logo()}<b>Euro4All</b></a>`
+    : `<div class="bar-tools"><button class="hbtn" data-act="back">${icon("back", "flip")}<span>${t("back")}</span></button><a class="hbtn" href="#home">${icon("home")}<span class="opt">${t("home")}</span></a></div>`;
+  const langBtn = top ? `<button class="hbtn" data-act="langs" aria-expanded="false">${icon("globe")}<span class="opt">${l.name}</span></button>` : "";
+  return `<div class="bar">${left}<div class="bar-tools">${size}${voice}${langBtn}</div></div>
     <div class="langs" id="langs" hidden>${L.map(x => `<button class="chip ${x.code === S.lang ? "on" : ""}" data-act="lang" data-v="${x.code}" lang="${x.code}" dir="${x.dir}">${x.name}</button>`).join("")}</div>
     ${l.draft ? `<p class="draft">${t("draftNote")}</p>` : ""}`;
 }
 
 function vHome() {
-  const tile = (go, ic, k) => `<a class="tile" href="#${go}">${icon(ic)}<span><b>${t(k)}</b><small>${t(k + "Sub")}</small></span></a>`;
+  const done = store.get("lessons", []).length, w = W.get(), best = store.get("scamBest", null);
+  const row = (go, n, ic, k, prog) => `<a class="step-row" href="#${go}"><span class="step-n">${n}</span>${icon(ic)}<span class="step-t"><b data-auto>${t(k)}</b><small>${t(k + "Sub")}</small>${prog ? `<em>${prog}</em>` : ""}</span>${icon("next", "flip")}</a>`;
   return `<section class="hero band">
       <div class="hero-txt"><h1>Euro4All</h1><p class="lead">${t("tagline")}</p></div>${heroArt()}</section>
-    <nav class="tiles">${tile("learn", "book", "learn")}${tile("practice", "wallet", "practice")}${tile("protect", "shield", "protect")}${tile("ambassador", "people", "ambassador")}</nav>
-    <a class="wide-link" href="#observatory">${icon("chart")}<span><b>${t("observatory")}</b> · ${t("observatorySub")}</span>${icon("next", "flip")}</a>`;
+    ${helpBlock("helpHome")}
+    <h2 class="ask" data-auto>${t("whatToDo")}</h2>
+    <nav class="step-list">
+      ${row("learn", 1, "book", "learn", t("lessonsDone", { n: done, t: D().lessons.length }))}
+      ${row("practice", 2, "wallet", "practice", t("balanceNow", { amt: fmt(w.bal) }))}
+      ${row("protect", 3, "shield", "protect", best != null ? t("bestScore", { c: best, t: SCAMK.length }) : "")}
+    </nav>
+    <button class="wide-link" data-act="setup-open">${icon("settings")}<span><b>${t("settings")}</b> · ${t("settingsSub")}</span>${icon("next", "flip")}</button>
+    <h2 class="small-h">${t("forTrainers")}</h2>
+    <div class="trainer-links">
+      <a class="wide-link" href="#ambassador">${icon("people")}<span><b>${t("ambassador")}</b> · ${t("ambassadorSub")}</span>${icon("next", "flip")}</a>
+      <a class="wide-link" href="#observatory">${icon("chart")}<span><b>${t("observatory")}</b> · ${t("observatorySub")}</span>${icon("next", "flip")}</a>
+    </div>`;
+}
+
+/* First-run welcome: language, text size, voice */
+function vSetup() {
+  const st = S.sub.st || 0;
+  if (st === 0) return `<h1 class="title" data-auto>${t("welcome")}</h1><p class="big" data-auto>${t("chooseLang")}</p>
+    <div class="biglist">${L.map(x => `<button class="bigchoice ${x.code === S.lang ? "on" : ""}" data-act="setup-lang" data-v="${x.code}" lang="${x.code}" dir="${x.dir}">${x.name}</button>`).join("")}</div>`;
+  if (st === 1) return `<h1 class="title" data-auto>${t("chooseSize")}</h1>
+    <div class="biglist">${[0, 1, 2].map(i => `<button class="bigchoice ${S.size === i ? "on" : ""}" data-act="setup-size" data-v="${i}"><span class="sample s${i}">${t("sizeSample")}</span><small>${t("sizes")[i]}</small></button>`).join("")}</div>
+    <button class="btn big full" data-act="setup-next">${t("continue")}${icon("next", "flip")}</button>`;
+  return `<h1 class="title" data-auto>${t("voiceQ")}</h1><p class="big">${t("voiceExplain")}</p>
+    <div class="biglist"><button class="bigchoice ${S.voice ? "on" : ""}" data-act="setup-voice" data-v="1">${icon("speaker")} ${t("voiceYes")}</button>
+    <button class="bigchoice ${S.voice ? "" : "on"}" data-act="setup-voice" data-v="0">${icon("mute")} ${t("voiceNo")}</button></div>`;
 }
 
 /* Learn */
 function vLearn() {
   const d = D(), done = store.get("lessons", []), sub = S.sub;
+  if (sub.done) {
+    const more = sub.i < d.lessons.length - 1, all = done.length >= d.lessons.length;
+    return `<section class="result ok">${icon("check", "res-ic")}<h1 class="title" data-auto>${t("lessonDone")}</h1>
+      ${all ? `<p class="big" data-auto>${t("allDone")}</p>` : ""}
+      <div class="col">${more ? `<button class="btn big full" data-act="lesson" data-i="${sub.i + 1}">${t("nextLesson")}${icon("next", "flip")}</button>` : ""}
+      ${all ? `<a class="btn big full alt" href="#practice">${icon("wallet")}${t("goPractice")}</a>` : ""}
+      <button class="btn ghost full" data-act="lesson-list">${t("allLessons")}</button></div></section>`;
+  }
   if (sub.i == null) {
-    return `<h1 class="title">${t("learn")}</h1><p class="lead2">${t("learnSub")}</p>
+    return `${helpBlock("helpLearn")}<h1 class="title" data-auto>${t("learn")}</h1><p class="lead2">${t("learnSub")}</p>
     <ol class="lessons">${d.lessons.map((ls, i) => `<li><button class="lesson-row" data-act="lesson" data-i="${i}">
       <span class="num">${done.includes(i) ? icon("check") : i + 1}</span>${icon(LESSON_ICONS[i])}<b>${esc(ls.title)}</b>${icon("next", "flip")}</button></li>`).join("")}</ol>`;
   }
   const ls = d.lessons[sub.i], s = sub.s || 0, last = s === ls.slides.length - 1;
-  return `<p class="kicker">${t("lessonOf", { n: sub.i + 1, t: d.lessons.length })}</p>
+  return `${helpBlock("helpLesson")}<p class="kicker">${t("lessonOf", { n: sub.i + 1, t: d.lessons.length })} · ${s + 1}/${ls.slides.length}</p>
     <article class="slide">
       <div class="slide-ic">${icon(LESSON_ICONS[sub.i])}</div>
-      <h1 class="title">${esc(ls.title)}</h1>
-      <p class="big" id="slide-text">${esc(ls.slides[s])}</p>
+      <h1 class="title" ${s === 0 ? "data-auto" : ""}>${esc(ls.title)}</h1>
+      <p class="big" id="slide-text" data-auto>${esc(ls.slides[s])}</p>
       <div class="dots">${ls.slides.map((_, k) => `<i class="${k === s ? "on" : ""}"></i>`).join("")}</div>
     </article>
     <div class="row">${s > 0 ? `<button class="btn ghost" data-act="slide" data-d="-1">${icon("back", "flip")}${t("prev")}</button>` : ""}
@@ -364,7 +412,7 @@ function vPractice() {
   if (sub.mode === "send") return vSend(sub, w);
   if (sub.mode === "recv") return vRecv(sub);
   if (sub.mode === "demo") return vDemo(sub);
-  return `<section class="wallet band">
+  return `${helpBlock("helpPractice")}<section class="wallet band">
       <div class="w-top"><span>${t("walletTitle")}</span>
         <button class="net ${offline ? "off" : ""}" data-act="net">${icon(offline ? "plane" : "signal", offline ? "" : "on-sig")}${offline ? t("offline") : t("online")}</button></div>
       <p class="bal"><small>${t("balance")}</small><b>${fmt(w.bal)}</b><small>${t("playMoney")}</small></p>
@@ -383,32 +431,32 @@ function vShop(sub, w, d) {
   if (sub.step === "result") {
     const r = sub.res;
     return `<section class="result ${r.ok ? "ok" : "warn"}">${icon(r.ok ? "check" : "alert", "res-ic")}
-      <h1 class="title" id="res-text">${esc(r.msg)}</h1>${r.note ? `<p class="lead2">${esc(r.note)}</p>` : ""}
+      <h1 class="title" id="res-text" data-auto>${esc(r.msg)}</h1>${r.note ? `<p class="lead2">${esc(r.note)}</p>` : ""}
       ${r.receipt ? `<dl class="receipt"><dt>${t("paidTo")}</dt><dd>${esc(nm.name)}</dd><dt>${t("item")}</dt><dd>${esc(nm.item)}</dd><dt>${t("balance")}</dt><dd>${fmt(w.bal)}</dd></dl>` : ""}
-      <div class="row">${sayBtn("res-text")}<button class="btn" data-act="pr-home">${t("ok")}</button></div></section>`;
+      <div class="row">${sayBtn("res-text")}<button class="btn big" data-act="pr-home">${t("ok")}</button></div></section>`;
   }
   const till = `<div class="till"><div class="till-head">${icon(s.icon)}<b>${esc(nm.name)}</b></div>
       <p class="menu-line"><span>${esc(nm.item)}</span><span>${t("menuPrice")}: <b>${fmt(s.price)}</b></span></p>
       <div class="lcd"><small>${t("amountToPay")}</small><b>${fmt(shown)}</b></div></div>`;
   if (sub.step === "hold") return `${till}<div class="tap-anim">${icon("phone")}<span></span></div><p class="big center">${t("holding")}</p>`;
   if (sub.step === "confirm") {
-    return `${till}<section class="confirm"><h1 class="title" id="cq">${t("confirmQ", { amt: fmt(shown), shop: esc(nm.name) })}</h1>
+    return `${till}<section class="confirm"><h1 class="title" id="cq" data-auto>${t("confirmQ", { amt: fmt(shown), shop: esc(nm.name) })}</h1>
       <p class="lead2">${t("checkAmount")}</p>
       <div class="row two"><button class="btn ghost big" data-act="shop-cancel">${icon("x")}${t("cancel")}</button><button class="btn big" data-act="shop-pay">${icon("check")}${t("confirm")}</button></div>${sayBtn("cq")}</section>`;
   }
-  return `${till}<p class="lead2 center">${t("checkAmount")}</p>
+  return `${helpBlock("helpShop")}${till}<p class="big center" data-auto>${t("checkAmount")}</p>
     <button class="btn big full" data-act="shop-tap">${icon("phone")}${t("tapToPay")}</button>
     <button class="btn ghost full" data-act="shop-cancel">${t("cancel")}</button>`;
 }
 function vSend(sub, w) {
   if (sub.step === "code") {
     return `<h1 class="title">${fmt(sub.amt)}</h1><div class="qr-box" id="qr">${qrSVG(sub.token)}</div>
-      <p class="lead2" id="show-code">${t("showCode")}</p>
+      <p class="big" id="show-code" data-auto>${t("showCode")}</p>
       <div class="row">${sayBtn("show-code")}<button class="btn" data-act="pr-home">${t("done")}</button></div>
       <details class="how"><summary>${t("howItWorks")}</summary><p>${t("howText")}</p><textarea class="code-ta" readonly rows="3">${esc(sub.token)}</textarea></details>`;
   }
   const amt = sub.amt || 0;
-  return `<h1 class="title">${t("sendTitle")}</h1>
+  return `${helpBlock("helpSend")}<h1 class="title" data-auto>${t("sendTitle")}</h1>
     <p class="amount-display" aria-live="polite">${fmt(amt)}</p><p class="note center">${t("balance")}: ${fmt(w.bal)}</p>
     <div class="chips">${[100, 200, 500, 1000, 2000].map(v => `<button class="chip" data-act="amt" data-v="${v}">${fmt(v)}</button>`).join("")}</div>
     <div class="keypad">${[1, 2, 3, 4, 5, 6, 7, 8, 9].map(k => `<button data-act="key" data-v="${k}">${k}</button>`).join("")}
@@ -420,10 +468,10 @@ function vRecv(sub) {
   if (sub.step === "result") {
     const r = sub.res;
     return `<section class="result ${r.ok ? "ok" : "warn"}">${icon(r.ok ? "check" : "alert", "res-ic")}
-      <h1 class="title" id="res-text">${esc(r.msg)}</h1>${r.sub ? `<p class="lead2">${icon("lock")} ${esc(r.sub)}</p>` : ""}
+      <h1 class="title" id="res-text" data-auto>${esc(r.msg)}</h1>${r.sub ? `<p class="lead2">${icon("lock")} ${esc(r.sub)}</p>` : ""}
       <div class="row">${sayBtn("res-text")}<button class="btn" data-act="pr-home">${t("ok")}</button></div></section>`;
   }
-  return `<h1 class="title">${t("receiveTitle")}</h1>
+  return `${helpBlock("helpRecv")}<h1 class="title" data-auto>${t("receiveTitle")}</h1>
     <div class="cam-wrap"><video id="cam" hidden></video><p id="cam-msg" class="note">${icon("camera")}</p></div>
     <div class="row two"><button class="btn big" data-act="cam">${icon("camera")}${t("startCamera")}</button>
       <label class="btn big alt">${icon("image")}${t("photoInstead")}<input type="file" accept="image/*" capture="environment" id="photo" hidden></label></div>
@@ -433,36 +481,40 @@ function vDemo(sub) {
   const st = sub.st || 0, n = t("names"), amt = fmt(500), steps = t("demoSteps");
   const left = st === 0 ? `<b class="ph-amt">${amt}</b>` : st < 3 ? `<div class="ph-qr">${sub.token ? qrSVG(sub.token) : ""}</div>` : `<b class="ph-amt neg">−${amt}</b>`;
   const right = st < 2 ? `<span class="ph-wait">${icon("camera")}</span>` : st === 2 ? `<span class="ph-wait">${icon("lock")}</span><small>${t("checking")}</small>` : `<b class="ph-amt pos">+${amt}</b><small>${icon("check")}</small>`;
-  return `<h1 class="title">${t("demoTitle")}</h1>
+  return `${helpBlock("helpDemo")}<h1 class="title">${t("demoTitle")}</h1>
     <div class="demo st${st}">
       <div class="ph"><p class="ph-name">${esc(n[0])}</p><div class="ph-scr"><span class="ph-plane">${icon("plane")}</span>${left}</div></div>
       <div class="beam" aria-hidden="true"><i></i></div>
       <div class="ph"><p class="ph-name">${esc(n[1])}</p><div class="ph-scr"><span class="ph-plane">${icon("plane")}</span>${right}</div></div>
     </div>
-    <p class="big center" id="demo-cap">${esc(steps[st].replace(/\{amt\}/g, amt))}</p>
+    <p class="big center" id="demo-cap" data-auto>${esc(steps[st].replace(/\{amt\}/g, amt))}</p>
     <div class="row">${sayBtn("demo-cap")}${st < 3 ? `<button class="btn" data-act="demo-next">${st ? t("next") : t("demoStart")}${icon("next", "flip")}</button>` : `<button class="btn" data-act="demo-reset">${icon("refresh")}${t("reset")}</button>`}</div>`;
 }
 
 /* Stay safe: scam or safe cards (also used inside sessions) */
 function scamCard(idx, sub) {
-  const k = SCAMK[idx], c = D().scams[idx], ans = sub.ans, right = ans && ans === k.a;
-  const chan = t("channels")[k.ch] || k.ch;
+  const k = SCAMK[idx], c = D().scams[idx], ans = sub.ans, right = ans && ans === k.a, unsure = ans === "u";
+  const chan = t("channels")[k.ch] || k.ch, label = k.a === "s" ? t("scam") : t("safe");
+  const head = unsure ? `${t("unsureFb")} ${t("answerIs")} ${label}` : right ? `${t("correct")} ${label}` : `${t("wrong")} ${t("answerIs")} ${label}`;
   return `<article class="msg ch-${k.ch}"><p class="msg-meta">${icon(CH_ICON[k.ch])}<span>${esc(chan)}</span></p>
-      <p class="msg-from">${esc(c.from)}</p><p class="msg-text" id="msg-text">${esc(c.text)}</p></article>
-    ${ans ? `<section class="fb ${right ? "ok" : "warn"}">${icon(right ? "check" : "alert", "res-ic")}
-        <h2>${right ? t("correct") : t("wrong") + " " + t("answerIs")} ${k.a === "s" ? t("scam") : t("safe")}</h2>
-        <p><b>${t("signs")}:</b> <span id="why">${esc(c.why)}</span></p>
-        <div class="row">${sayBtn("why")}<button class="btn" data-act="scam-next">${t("next")}${icon("next", "flip")}</button></div></section>`
-      : `<div class="row two"><button class="btn big danger" data-act="scam-ans" data-v="s">${icon("alert")}${t("scam")}</button><button class="btn big ok" data-act="scam-ans" data-v="k">${icon("check")}${t("safe")}</button></div>${sayBtn("msg-text")}`}`;
+      <p class="msg-from">${esc(c.from)}</p><p class="msg-text" id="msg-text" ${ans ? "" : "data-auto"}>${esc(c.text)}</p></article>
+    ${ans ? `<section class="fb ${right ? "ok" : unsure ? "mid" : "warn"}">${icon(right ? "check" : unsure ? "help" : "alert", "res-ic")}
+        <h2 data-auto>${head}</h2>
+        <p><b>${t("signs")}:</b> <span id="why" data-auto>${esc(c.why)}</span></p>
+        ${unsure ? `<p class="tip" data-auto>${t("unsureTip")}</p>` : ""}
+        <div class="row">${sayBtn("why")}<button class="btn big" data-act="scam-next">${t("next")}${icon("next", "flip")}</button></div></section>`
+      : `<div class="row two"><button class="btn big danger" data-act="scam-ans" data-v="s">${icon("alert")}${t("scam")}</button><button class="btn big ok" data-act="scam-ans" data-v="k">${icon("check")}${t("safe")}</button></div>
+      <div class="row"><button class="btn ghost big unsure" data-act="scam-ans" data-v="u">${icon("help")}${t("unsure")}</button>${sayBtn("msg-text")}</div>`}`;
 }
 function vProtect() {
   const sub = S.sub, list = SCAMK.map((_, i) => i);
   sub.k = sub.k || 0; sub.right = sub.right || 0;
   if (sub.k >= list.length) {
-    return `<section class="result ok">${icon("shield", "res-ic")}<h1 class="title" id="res-text">${t("score", { c: sub.right, t: list.length })}</h1>
+    if (!sub.saved) { sub.saved = true; const b = store.get("scamBest", null); if (b == null || sub.right > b) store.set("scamBest", sub.right); }
+    return `<section class="result ok">${icon("shield", "res-ic")}<h1 class="title" id="res-text" data-auto>${t("score", { c: sub.right, t: list.length })}</h1>
       <div class="row">${sayBtn("res-text")}<button class="btn" data-act="scam-again">${icon("refresh")}${t("again")}</button></div></section>`;
   }
-  return `<p class="kicker">${t("protectTitle")} · ${sub.k + 1}/${list.length}</p><p class="lead2">${t("protectIntro")}</p>${scamCard(list[sub.k], sub)}`;
+  return `${helpBlock("helpProtect")}<p class="kicker">${t("protectTitle")} · ${sub.k + 1}/${list.length}</p><p class="lead2">${t("protectIntro")}</p>${scamCard(list[sub.k], sub)}`;
 }
 
 /* Ambassador: open a session, show join QR, live counts */
@@ -496,7 +548,7 @@ function newJoin(code, venue, place, kiosk) {
 function vJoin() {
   const sub = S.sub;
   const head = `<p class="kicker">${esc(sub.code)}</p>`;
-  if (sub.step === "consent") return `${head}<h1 class="title">${t("consentTitle")}</h1><p class="big" id="cons">${t("consentText")}</p>
+  if (sub.step === "consent") return `${head}<h1 class="title">${t("consentTitle")}</h1><p class="big" id="cons" data-auto>${t("consentText")}</p>
     <div class="row">${sayBtn("cons")}<button class="btn big" data-act="j-agree">${icon("check")}${t("agree")}</button></div>`;
   if (sub.step === "about") {
     const ch = (f, arr) => arr.map((x, i) => `<button class="chip ${sub[f] === i ? "on" : ""}" data-act="j-pick" data-f="${f}" data-v="${i}">${esc(x)}</button>`).join("");
@@ -506,15 +558,15 @@ function vJoin() {
   }
   if (sub.step === "pre" || sub.step === "post") {
     const q = t("questions")[sub.q], sc = t("scale");
-    return `${head}<p class="phase">${sub.step === "pre" ? t("beforeTitle") : t("afterTitle")} · ${sub.q + 1}/3</p>
-      <h1 class="title" id="qtext">${esc(q)}</h1>
+    return `${head}${helpBlock("helpJoin")}<p class="phase">${sub.step === "pre" ? t("beforeTitle") : t("afterTitle")} · ${sub.q + 1}/3</p>
+      <h1 class="title" id="qtext" data-auto>${esc(q)}</h1>
       <div class="faces">${[1, 2, 3, 4, 5].map(v => `<button class="face-btn" data-act="j-face" data-v="${v}">${face(v)}<span>${esc(sc[v - 1])}</span></button>`).join("")}</div>${sayBtn("qtext")}`;
   }
   if (sub.step === "act") {
-    if (sub.intro !== false) return `${head}<h1 class="title">${t("activityTitle")}</h1><p class="big">${t("activityText")}</p><button class="btn big full" data-act="j-act-go">${t("continue")}${icon("next", "flip")}</button>`;
+    if (sub.intro !== false) return `${head}<h1 class="title" data-auto>${t("activityTitle")}</h1><p class="big" data-auto>${t("activityText")}</p><button class="btn big full" data-act="j-act-go">${t("continue")}${icon("next", "flip")}</button>`;
     return `${head}<p class="kicker">${t("protectTitle")} · ${sub.k + 1}/${SESSION_CARDS.length}</p>${scamCard(SESSION_CARDS[sub.k], sub)}`;
   }
-  return `<section class="result ok">${icon("check", "res-ic")}<h1 class="title">${t("thanks")}</h1><p class="big">${t("thanksText")}</p>
+  return `<section class="result ok">${icon("check", "res-ic")}<h1 class="title" data-auto>${t("thanks")}</h1><p class="big" data-auto>${t("thanksText")}</p>
     <p class="lead2"><b>${t("yourScore", { c: sub.right, t: SESSION_CARDS.length })}</b></p>
     <div class="row">${sub.kiosk ? `<button class="btn big" data-act="j-back">${icon("people")}${t("backToSession")}</button>` : `<a class="btn big" href="#home">${t("home")}</a>`}</div></section>`;
 }
@@ -554,12 +606,12 @@ function vObservatory() {
 }
 
 /* ---------- render + routing ---------- */
-const VIEW_FN = { home: vHome, learn: vLearn, practice: vPractice, protect: vProtect, ambassador: vAmbassador, observatory: vObservatory, join: vJoin };
+const VIEW_FN = { home: vHome, setup: vSetup, learn: vLearn, practice: vPractice, protect: vProtect, ambassador: vAmbassador, observatory: vObservatory, join: vJoin };
 function applyLang() {
   const l = lang(), r = document.documentElement;
   r.lang = l.code; r.dir = l.dir; r.dataset.size = S.size;
 }
-function render() {
+function render(quiet) {
   applyLang();
   $("#top").innerHTML = header();
   $("#main").innerHTML = (VIEW_FN[S.view] || vHome)();
@@ -567,6 +619,7 @@ function render() {
   $("#foot").innerHTML = `<p>${t("simNote")}</p><p>${t("contentDate")} · Euro4All · ERUA iDeaThon 2026</p>`;
   const f = $("#photo"); if (f) f.addEventListener("change", e => { const file = e.target.files && e.target.files[0]; if (file) scanFile(file); });
   const sel = $("#obs-filter"); if (sel) sel.addEventListener("change", e => { S.sub.filter = e.target.value; render(); });
+  if (!quiet) speakAuto();
 }
 function route() {
   stopCamera(); stopSpeak();
@@ -574,9 +627,10 @@ function route() {
   const m = /^join-([A-Z]{3})-(\d{4})-(\d)$/.exec(h);
   if (m) { S.view = "join"; S.sub = newJoin(m[1] + "-" + m[2], +m[3], Math.max(0, PLACE_CODES.indexOf(m[1])), false); }
   else if (VIEWS.includes(h)) { S.view = h; S.sub = {}; }
+  else if (!store.get("setup", false)) { S.view = "setup"; S.sub = { st: 0 }; }
   else { S.view = "home"; S.sub = {}; }
   render(); window.scrollTo(0, 0);
-  if (S.view === "observatory" || S.view === "ambassador") loadRows().then(() => { if (S.view === "observatory" || S.view === "ambassador") render(); });
+  if (S.view === "observatory" || S.view === "ambassador") loadRows().then(() => { if (S.view === "observatory" || S.view === "ambassador") render(true); });
 }
 const go = v => { if (location.hash.slice(1) === v) route(); else location.hash = v; };
 const rerender = () => { render(); window.scrollTo(0, 0); };
@@ -586,11 +640,32 @@ const A = {
   back() {
     stopCamera(); stopSpeak();
     if (S.view === "learn" && S.sub.i != null) { S.sub = {}; return rerender(); }
+    if (S.view === "setup" && (S.sub.st || 0) > 0) { S.sub.st--; return rerender(); }
     if (S.view === "practice" && S.sub.mode) { S.sub = {}; return rerender(); }
     if (S.view === "join" && S.sub.kiosk) { S.view = "ambassador"; S.sub = {}; return rerender(); }
     go("home");
   },
-  size() { S.size = (S.size + 1) % 3; store.set("size", S.size); applyLang(); },
+  size() { S.size = (S.size + 1) % 3; store.set("size", S.size); applyLang(); toast(t("sizeNow", { s: t("sizes")[S.size] })); },
+  voice() {
+    S.voice = !S.voice; store.set("voice", S.voice); render(true);
+    if (S.voice) { S.lastAuto = ""; speak(t("voiceOn"), true); } else { stopSpeak(); toast(t("voiceOff")); }
+  },
+  help(el) {
+    const p = $("#help-text"); if (!p) return;
+    p.hidden = !p.hidden; el.setAttribute("aria-expanded", String(!p.hidden));
+    if (!p.hidden) speak(p.textContent, true); else stopSpeak();
+  },
+  "setup-open"() { S.view = "setup"; S.sub = { st: 0 }; rerender(); },
+  "setup-lang"(el) { S.lang = el.dataset.v; store.set("lang", S.lang); S.sub.st = 1; rerender(); },
+  "setup-size"(el) { S.size = +el.dataset.v; store.set("size", S.size); render(true); },
+  "setup-next"() { S.sub.st = 2; rerender(); },
+  "setup-voice"(el) {
+    S.voice = el.dataset.v === "1"; store.set("voice", S.voice); store.set("setup", true);
+    if (S.voice) speak(t("voiceTest"), true);
+    S.lastAuto = t("voiceTest");
+    if (location.hash.slice(1) === "home") { S.view = "home"; S.sub = {}; rerender(); } else location.hash = "home";
+  },
+  "lesson-list"() { S.sub = {}; rerender(); },
   langs(el) { const p = $("#langs"); p.hidden = !p.hidden; el.setAttribute("aria-expanded", String(!p.hidden)); },
   lang(el) { S.lang = el.dataset.v; store.set("lang", S.lang); stopSpeak(); render(); },
   say(el) { const n = document.getElementById(el.dataset.target); if (n) speak(n.textContent); },
@@ -598,7 +673,7 @@ const A = {
   slide(el) {
     const sub = S.sub, ls = D().lessons[sub.i], s = (sub.s || 0) + (+el.dataset.d);
     stopSpeak();
-    if (s >= ls.slides.length) { const done = store.get("lessons", []); if (!done.includes(sub.i)) done.push(sub.i); store.set("lessons", done); S.sub = {}; }
+    if (s >= ls.slides.length) { const done = store.get("lessons", []); if (!done.includes(sub.i)) done.push(sub.i); store.set("lessons", done); S.sub = { i: sub.i, done: true }; buzz(true); }
     else sub.s = Math.max(0, s);
     rerender();
   },
@@ -613,12 +688,12 @@ const A = {
       w.bal += shown; w.tx.unshift({ kind: "refund", amt: shown, ts: Date.now() });
       sub.res = { ok: false, msg: t("wrongPaid", { wrong: fmt(shown), right: fmt(s.price) }), note: t("refundNote") };
     } else sub.res = { ok: true, msg: t("paid"), receipt: true };
-    W.save(w); sub.step = "result"; rerender();
+    W.save(w); sub.step = "result"; buzz(sub.res.ok); rerender();
   },
   "shop-cancel"() {
     const sub = S.sub, s = SHOPS.find(x => x.id === sub.id);
     sub.res = s.shown && s.shown !== s.price ? { ok: true, msg: t("wrongCaught", { wrong: fmt(s.shown), right: fmt(s.price) }) } : { ok: false, msg: t("cancelled") };
-    sub.step = "result"; rerender();
+    sub.step = "result"; buzz(sub.res.ok); rerender();
   },
   "pr-home"() { stopCamera(); S.sub = {}; rerender(); },
   send() { S.sub = { mode: "send", amt: 0 }; rerender(); },
@@ -643,12 +718,12 @@ const A = {
   async demo() { S.sub = { mode: "demo", st: 0 }; rerender(); const sub = S.sub; try { sub.token = (await makeToken(500)).token; } catch (e) { } },
   "demo-next"() { S.sub.st = Math.min(3, (S.sub.st || 0) + 1); render(); },
   "demo-reset"() { S.sub.st = 0; render(); },
-  "wallet-reset"() { store.del("wallet"); render(); },
+  "wallet-reset"() { dialog(t("confirmReset"), () => { store.del("wallet"); render(); }); },
   "scam-ans"(el) {
     const sub = S.sub, list = S.view === "join" ? SESSION_CARDS : SCAMK.map((_, i) => i), idx = list[sub.k];
     if (sub.ans) return;
-    sub.ans = el.dataset.v; if (sub.ans === SCAMK[idx].a) sub.right = (sub.right || 0) + 1;
-    render();
+    sub.ans = el.dataset.v; const ok = sub.ans === SCAMK[idx].a; if (ok) sub.right = (sub.right || 0) + 1;
+    buzz(ok); render();
   },
   "scam-next"() {
     const sub = S.sub; sub.ans = null; sub.k = (sub.k || 0) + 1; stopSpeak();
@@ -709,7 +784,7 @@ window.addEventListener("online", flushOutbox);
 setInterval(() => {
   if (document.hidden) return;
   const live = () => S.view === "observatory" || (S.view === "ambassador" && store.get("session", null));
-  if (live()) loadRows().then(() => { if (live() && $("#dialog").hidden) render(); });
+  if (live()) loadRows().then(() => { if (live() && $("#dialog").hidden) render(true); });
 }, SHARED ? 5000 : 15000);
 if (window.speechSynthesis) { try { window.speechSynthesis.getVoices(); window.speechSynthesis.onvoiceschanged = () => { }; } catch (e) { } }
 try { if ("serviceWorker" in navigator && (location.protocol === "https:" || location.hostname === "localhost")) navigator.serviceWorker.register("sw.js").catch(() => { }); } catch (e) { }
